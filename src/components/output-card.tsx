@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { exportMarkdownToGoogleSlides } from '@/lib/google-slides-export'
@@ -15,28 +15,41 @@ export function OutputCard({
   onSave,
 }: {
   content: string
-  onSave?: () => Promise<void>
+  onSave?: (content: string) => Promise<void>
 }) {
+  const [currentContent, setCurrentContent] = useState(content)
   const [saved, setSaved] = useState(false)
   const [copied, setCopied] = useState(false)
   const [exportingSlides, setExportingSlides] = useState(false)
   const [exportingTeacherSlides, setExportingTeacherSlides] = useState(false)
+  const [adjustment, setAdjustment] = useState('')
+  const [adjusting, setAdjusting] = useState(false)
+  const [adjustError, setAdjustError] = useState('')
+  const [adjustMessage, setAdjustMessage] = useState('')
 
-  const bundleSections = useMemo(() => getBundleSections(content), [content])
+  useEffect(() => {
+    setCurrentContent(content)
+    setSaved(false)
+    setAdjustment('')
+    setAdjustError('')
+    setAdjustMessage('')
+  }, [content])
+
+  const bundleSections = useMemo(() => getBundleSections(currentContent), [currentContent])
   const teacherSlidesOnly = useMemo(
-    () => extractBundleSection(content, 'Teacher Slides'),
-    [content]
+    () => extractBundleSection(currentContent, 'Teacher Slides'),
+    [currentContent]
   )
 
   const handleCopy = async () => {
-    await navigator.clipboard.writeText(content)
+    await navigator.clipboard.writeText(currentContent)
     setCopied(true)
     setTimeout(() => setCopied(false), 1500)
   }
 
   const handleSave = async () => {
     if (!onSave) return
-    await onSave()
+    await onSave(currentContent)
     setSaved(true)
   }
 
@@ -47,7 +60,7 @@ export function OutputCard({
   const handleExportSlides = async () => {
     try {
       setExportingSlides(true)
-      await exportMarkdownToGoogleSlides(content)
+      await exportMarkdownToGoogleSlides(currentContent)
     } catch (error) {
       alert(error instanceof Error ? error.message : 'Google Slides export failed.')
     } finally {
@@ -58,13 +71,51 @@ export function OutputCard({
   const handleExportTeacherSlides = async () => {
     try {
       setExportingTeacherSlides(true)
-      const source = teacherSlidesOnly || content
+      const source = teacherSlidesOnly || currentContent
       await exportMarkdownToGoogleSlides(source)
     } catch (error) {
       alert(error instanceof Error ? error.message : 'Teacher Slides export failed.')
     } finally {
       setExportingTeacherSlides(false)
     }
+  }
+
+  const handleAdjust = async () => {
+    if (!adjustment.trim()) return
+
+    try {
+      setAdjusting(true)
+      setAdjustError('')
+      setAdjustMessage('')
+
+      const res = await fetch('/api/adjust', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ currentContent, adjustment }),
+      })
+
+      const text = await res.text()
+      const data = text ? JSON.parse(text) : {}
+
+      if (!res.ok) {
+        throw new Error(data.error || 'Unable to adjust the resource.')
+      }
+
+      setCurrentContent(data.content || currentContent)
+      setAdjustMessage('Resource updated.')
+      setAdjustment('')
+      setSaved(false)
+    } catch (err) {
+      setAdjustError(err instanceof Error ? err.message : 'Unable to adjust the resource.')
+    } finally {
+      setAdjusting(false)
+    }
+  }
+
+  const applyQuickAdjustment = (value: string) => {
+    setAdjustment(value)
+    setAdjustError('')
+    setAdjustMessage('')
   }
 
   const jumpToSection = (section: string) => {
@@ -169,6 +220,116 @@ export function OutputCard({
           ))}
         </div>
       )}
+
+      <div
+        className="no-print"
+        style={{
+          marginBottom: '18px',
+          border: '1px solid #e2e8f0',
+          borderRadius: '16px',
+          padding: '16px',
+          background: '#f8fafc',
+        }}
+      >
+        <h3
+          style={{
+            margin: '0 0 10px 0',
+            fontSize: '18px',
+            fontWeight: 700,
+            color: '#0f172a',
+          }}
+        >
+          Adjust this resource
+        </h3>
+
+        <p style={{ margin: '0 0 12px 0', color: '#475569', lineHeight: 1.7 }}>
+          Ask for a targeted change without regenerating the whole thing from scratch.
+        </p>
+
+        <textarea
+          className="input"
+          style={{ minHeight: '96px', resize: 'vertical', marginBottom: '12px' }}
+          value={adjustment}
+          onChange={(e) => setAdjustment(e.target.value)}
+          placeholder="Example: Make the exit ticket easier for 4th grade."
+        />
+
+        <div
+          style={{
+            display: 'flex',
+            gap: '8px',
+            flexWrap: 'wrap',
+            marginBottom: '12px',
+          }}
+        >
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={() => applyQuickAdjustment('Make it shorter.')}
+          >
+            Make it shorter
+          </button>
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={() => applyQuickAdjustment('Add ELL accommodations.')}
+          >
+            Add accommodations
+          </button>
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={() => applyQuickAdjustment('Make it more rigorous.')}
+          >
+            Make it more rigorous
+          </button>
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={() => applyQuickAdjustment('Rewrite only the exit ticket section.')}
+          >
+            Rewrite one section
+          </button>
+        </div>
+
+        <button type="button" className="btn-primary" onClick={handleAdjust} disabled={adjusting}>
+          {adjusting ? 'Updating...' : 'Update resource'}
+        </button>
+
+        {adjustMessage && (
+          <div
+            style={{
+              borderRadius: '12px',
+              border: '1px solid #bbf7d0',
+              background: '#f0fdf4',
+              color: '#166534',
+              padding: '12px 14px',
+              fontSize: '14px',
+              lineHeight: 1.6,
+              marginTop: '12px',
+            }}
+          >
+            {adjustMessage}
+          </div>
+        )}
+
+        {adjustError && (
+          <div
+            style={{
+              borderRadius: '12px',
+              border: '1px solid #fecaca',
+              background: '#fef2f2',
+              color: '#b91c1c',
+              padding: '12px 14px',
+              fontSize: '14px',
+              lineHeight: 1.6,
+              marginTop: '12px',
+            }}
+          >
+            {adjustError}
+          </div>
+        )}
+      </div>
 
       <div
         style={{
@@ -282,7 +443,7 @@ export function OutputCard({
             ),
           }}
         >
-          {content}
+          {currentContent}
         </ReactMarkdown>
       </div>
     </div>

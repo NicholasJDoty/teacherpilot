@@ -34,6 +34,49 @@ async function attachCustomerToUser(customerId: string, userId: string) {
     .eq('id', userId)
 }
 
+async function maybeCreateCommissionFromCheckout(session: Stripe.Checkout.Session) {
+  const referralCode = session.metadata?.referral_code?.trim().toUpperCase()
+  const referredUserId = session.metadata?.supabase_user_id
+  const customerId =
+    typeof session.customer === 'string' ? session.customer : session.customer?.id
+  const subscriptionId =
+    typeof session.subscription === 'string'
+      ? session.subscription
+      : session.subscription?.id
+  const grossAmount = session.amount_total ?? 0
+  const checkoutSessionId = session.id
+
+  if (!referralCode || !referredUserId || !checkoutSessionId) return
+
+  const { data: referral } = await supabaseAdmin
+    .from('referrals')
+    .select('user_id, code, commission_percent')
+    .eq('code', referralCode)
+    .maybeSingle()
+
+  if (!referral) return
+  if (referral.user_id === referredUserId) return
+
+  const commissionPercent = referral.commission_percent ?? 20
+  const commissionAmount = Math.round((grossAmount * commissionPercent) / 100)
+
+  await supabaseAdmin.from('commissions').upsert(
+    {
+      referrer_user_id: referral.user_id,
+      referred_user_id: referredUserId,
+      referral_code: referral.code,
+      stripe_checkout_session_id: checkoutSessionId,
+      stripe_customer_id: customerId ?? null,
+      stripe_subscription_id: subscriptionId ?? null,
+      gross_amount: grossAmount,
+      commission_amount: commissionAmount,
+    },
+    {
+      onConflict: 'stripe_checkout_session_id',
+    }
+  )
+}
+
 export async function POST(req: Request) {
   try {
     const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET
@@ -92,6 +135,8 @@ export async function POST(req: Request) {
             stripe_subscription_status: 'active',
           })
         }
+
+        await maybeCreateCommissionFromCheckout(session)
 
         break
       }

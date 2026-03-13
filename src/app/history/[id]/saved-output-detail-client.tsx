@@ -4,27 +4,11 @@ import { useMemo, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { exportMarkdownToGoogleSlides } from '@/lib/google-slides-export'
-
-function slugify(text: string) {
-  return text
-    .toLowerCase()
-    .trim()
-    .replace(/[^\w\s-]/g, '')
-    .replace(/\s+/g, '-')
-}
-
-function getBundleSections(content: string) {
-  const sections = [
-    'Teacher Slides',
-    'Student Worksheet',
-    'Exit Ticket',
-    'Google Form Quiz',
-  ]
-
-  return sections.filter((section) =>
-    content.toLowerCase().includes(`## ${section}`.toLowerCase())
-  )
-}
+import {
+  extractBundleSection,
+  getBundleSections,
+  slugifySection,
+} from '@/lib/bundle-sections'
 
 export default function SavedOutputDetailClient({
   content,
@@ -35,13 +19,23 @@ export default function SavedOutputDetailClient({
   title: string
   meta: string
 }) {
+  const [currentContent, setCurrentContent] = useState(content)
   const [copied, setCopied] = useState(false)
   const [exportingSlides, setExportingSlides] = useState(false)
+  const [exportingTeacherSlides, setExportingTeacherSlides] = useState(false)
+  const [adjustment, setAdjustment] = useState('')
+  const [adjusting, setAdjusting] = useState(false)
+  const [adjustError, setAdjustError] = useState('')
+  const [adjustMessage, setAdjustMessage] = useState('')
 
-  const bundleSections = useMemo(() => getBundleSections(content), [content])
+  const bundleSections = useMemo(() => getBundleSections(currentContent), [currentContent])
+  const teacherSlidesOnly = useMemo(
+    () => extractBundleSection(currentContent, 'Teacher Slides'),
+    [currentContent]
+  )
 
   const handleCopy = async () => {
-    await navigator.clipboard.writeText(content)
+    await navigator.clipboard.writeText(currentContent)
     setCopied(true)
     setTimeout(() => setCopied(false), 1500)
   }
@@ -53,7 +47,7 @@ export default function SavedOutputDetailClient({
   const handleExportSlides = async () => {
     try {
       setExportingSlides(true)
-      await exportMarkdownToGoogleSlides(content, title)
+      await exportMarkdownToGoogleSlides(currentContent, title)
     } catch (error) {
       alert(error instanceof Error ? error.message : 'Google Slides export failed.')
     } finally {
@@ -61,8 +55,57 @@ export default function SavedOutputDetailClient({
     }
   }
 
+  const handleExportTeacherSlides = async () => {
+    try {
+      setExportingTeacherSlides(true)
+      const source = teacherSlidesOnly || currentContent
+      await exportMarkdownToGoogleSlides(source, title)
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'Teacher Slides export failed.')
+    } finally {
+      setExportingTeacherSlides(false)
+    }
+  }
+
+  const handleAdjust = async () => {
+    if (!adjustment.trim()) return
+
+    try {
+      setAdjusting(true)
+      setAdjustError('')
+      setAdjustMessage('')
+
+      const res = await fetch('/api/adjust', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ currentContent, adjustment }),
+      })
+
+      const text = await res.text()
+      const data = text ? JSON.parse(text) : {}
+
+      if (!res.ok) {
+        throw new Error(data.error || 'Unable to adjust the resource.')
+      }
+
+      setCurrentContent(data.content || currentContent)
+      setAdjustMessage('Saved resource updated in the editor. Copy or export the revised version.')
+      setAdjustment('')
+    } catch (err) {
+      setAdjustError(err instanceof Error ? err.message : 'Unable to adjust the resource.')
+    } finally {
+      setAdjusting(false)
+    }
+  }
+
+  const applyQuickAdjustment = (value: string) => {
+    setAdjustment(value)
+    setAdjustError('')
+    setAdjustMessage('')
+  }
+
   const jumpToSection = (section: string) => {
-    const id = slugify(section)
+    const id = slugifySection(section)
     const target = document.getElementById(id)
     if (target) {
       target.scrollIntoView({ behavior: 'smooth', block: 'start' })
@@ -114,14 +157,25 @@ export default function SavedOutputDetailClient({
             Export PDF
           </button>
 
-          <button
-            type="button"
-            className="btn-secondary"
-            onClick={handleExportSlides}
-            disabled={exportingSlides}
-          >
-            {exportingSlides ? 'Exporting...' : 'Google Slides'}
-          </button>
+          {bundleSections.includes('Teacher Slides') ? (
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={handleExportTeacherSlides}
+              disabled={exportingTeacherSlides}
+            >
+              {exportingTeacherSlides ? 'Exporting slides...' : 'Teacher Slides → Google Slides'}
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={handleExportSlides}
+              disabled={exportingSlides}
+            >
+              {exportingSlides ? 'Exporting...' : 'Google Slides'}
+            </button>
+          )}
         </div>
       </div>
 
@@ -149,6 +203,116 @@ export default function SavedOutputDetailClient({
       )}
 
       <div
+        className="no-print"
+        style={{
+          marginBottom: '18px',
+          border: '1px solid #e2e8f0',
+          borderRadius: '16px',
+          padding: '16px',
+          background: '#f8fafc',
+        }}
+      >
+        <h3
+          style={{
+            margin: '0 0 10px 0',
+            fontSize: '18px',
+            fontWeight: 700,
+            color: '#0f172a',
+          }}
+        >
+          Adjust this resource
+        </h3>
+
+        <p style={{ margin: '0 0 12px 0', color: '#475569', lineHeight: 1.7 }}>
+          Ask for a targeted change without starting from the original prompt again.
+        </p>
+
+        <textarea
+          className="input"
+          style={{ minHeight: '96px', resize: 'vertical', marginBottom: '12px' }}
+          value={adjustment}
+          onChange={(e) => setAdjustment(e.target.value)}
+          placeholder="Example: Rewrite only the rubric section to be clearer for 5th grade."
+        />
+
+        <div
+          style={{
+            display: 'flex',
+            gap: '8px',
+            flexWrap: 'wrap',
+            marginBottom: '12px',
+          }}
+        >
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={() => applyQuickAdjustment('Make it shorter.')}
+          >
+            Make it shorter
+          </button>
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={() => applyQuickAdjustment('Add accommodations for ELL students.')}
+          >
+            Add accommodations
+          </button>
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={() => applyQuickAdjustment('Make it more rigorous.')}
+          >
+            Make it more rigorous
+          </button>
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={() => applyQuickAdjustment('Rewrite only one section and keep everything else the same.')}
+          >
+            Rewrite one section
+          </button>
+        </div>
+
+        <button type="button" className="btn-primary" onClick={handleAdjust} disabled={adjusting}>
+          {adjusting ? 'Updating...' : 'Update resource'}
+        </button>
+
+        {adjustMessage && (
+          <div
+            style={{
+              borderRadius: '12px',
+              border: '1px solid #bbf7d0',
+              background: '#f0fdf4',
+              color: '#166534',
+              padding: '12px 14px',
+              fontSize: '14px',
+              lineHeight: 1.6,
+              marginTop: '12px',
+            }}
+          >
+            {adjustMessage}
+          </div>
+        )}
+
+        {adjustError && (
+          <div
+            style={{
+              borderRadius: '12px',
+              border: '1px solid #fecaca',
+              background: '#fef2f2',
+              color: '#b91c1c',
+              padding: '12px 14px',
+              fontSize: '14px',
+              lineHeight: 1.6,
+              marginTop: '12px',
+            }}
+          >
+            {adjustError}
+          </div>
+        )}
+      </div>
+
+      <div
         style={{
           color: '#334155',
           fontSize: '14px',
@@ -167,7 +331,7 @@ export default function SavedOutputDetailClient({
               const text = String(children)
               return (
                 <h2
-                  id={slugify(text)}
+                  id={slugifySection(text)}
                   style={{ fontSize: '22px', fontWeight: 700, margin: '22px 0 10px' }}
                 >
                   {children}
@@ -260,7 +424,7 @@ export default function SavedOutputDetailClient({
             ),
           }}
         >
-          {content}
+          {currentContent}
         </ReactMarkdown>
       </div>
     </div>
