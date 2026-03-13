@@ -139,11 +139,11 @@ export function GeneratorForm() {
     }
   }
 
-  const saveOutput = async () => {
+  const saveOutput = async (latestContent: string) => {
     await fetch('/api/save-output', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...form, content }),
+      body: JSON.stringify({ ...form, content: latestContent }),
     })
   }
 
