@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { cookies } from 'next/headers'
 import { stripe } from '@/lib/stripe'
 import { createClient } from '@/lib/supabase-server'
 import { supabaseAdmin } from '@/lib/supabase-admin'
@@ -33,9 +34,12 @@ export async function POST() {
       )
     }
 
+    const cookieStore = await cookies()
+    const referralCode = cookieStore.get('referral_code')?.value ?? null
+
     const { data: profile } = await supabaseAdmin
       .from('profiles')
-      .select('stripe_customer_id, plan')
+      .select('stripe_customer_id')
       .eq('id', user.id)
       .single()
 
@@ -78,6 +82,7 @@ export async function POST() {
       },
       metadata: {
         supabase_user_id: user.id,
+        referral_code: referralCode ?? '',
       },
     })
 
