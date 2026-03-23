@@ -1,103 +1,46 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
+import Stripe from 'stripe'
+import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
-import { stripe } from '@/lib/stripe'
-import { createClient } from '@/lib/supabase-server'
-import { supabaseAdmin } from '@/lib/supabase-admin'
 
-export async function POST() {
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!)
+
+export async function POST(req: NextRequest) {
   try {
-    const supabase = await createClient()
-
-    const {
-      data: { user },
-      error: userError,
-    } = await supabase.auth.getUser()
-
-    if (userError || !user) {
-      return NextResponse.json({ error: 'You must be logged in.' }, { status: 401 })
-    }
-
-    const priceId = process.env.STRIPE_PRICE_ID
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL
-
-    if (!priceId) {
-      return NextResponse.json(
-        { error: 'Missing STRIPE_PRICE_ID in environment variables.' },
-        { status: 500 }
-      )
-    }
-
-    if (!appUrl) {
-      return NextResponse.json(
-        { error: 'Missing NEXT_PUBLIC_APP_URL in environment variables.' },
-        { status: 500 }
-      )
-    }
-
     const cookieStore = await cookies()
-    const referralCode = cookieStore.get('referral_code')?.value ?? null
-
-    const { data: profile } = await supabaseAdmin
-      .from('profiles')
-      .select('stripe_customer_id')
-      .eq('id', user.id)
-      .single()
-
-    let customerId = profile?.stripe_customer_id ?? null
-
-    if (!customerId) {
-      const customer = await stripe.customers.create({
-        email: user.email ?? undefined,
-        metadata: {
-          supabase_user_id: user.id,
+    const supabase = createServerClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      {
+        cookies: {
+          getAll()  { return cookieStore.getAll() },
+          setAll(cookiesToSet) {
+            try { cookiesToSet.forEach(({ name, value, options }) => cookieStore.set(name, value, options)) } catch {}
+          },
         },
-      })
+      }
+    )
 
-      customerId = customer.id
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-      await supabaseAdmin
-        .from('profiles')
-        .update({
-          stripe_customer_id: customerId,
-        })
-        .eq('id', user.id)
-    }
+    const { plan } = await req.json()
+    const priceId = plan === 'annual' ? process.env.STRIPE_ANNUAL_PRICE_ID! : process.env.STRIPE_MONTHLY_PRICE_ID!
 
-    const session = await stripe.checkout.sessions.create({
+    const checkoutSession = await stripe.checkout.sessions.create({
       mode: 'subscription',
-      customer: customerId,
-      line_items: [
-        {
-          price: priceId,
-          quantity: 1,
-        },
-      ],
-      success_url: `${appUrl}/settings?checkout=success`,
-      cancel_url: `${appUrl}/pricing?checkout=cancelled`,
-      allow_promotion_codes: true,
-      billing_address_collection: 'auto',
-      customer_update: {
-        address: 'auto',
-        name: 'auto',
-      },
-      metadata: {
-        supabase_user_id: user.id,
-        referral_code: referralCode ?? '',
-      },
+      payment_method_types: ['card'],
+      customer_email: session.user.email,
+      line_items: [{ price: priceId, quantity: 1 }],
+      success_url: `${process.env.NEXT_PUBLIC_APP_URL}/dashboard?upgraded=true`,
+      cancel_url:  `${process.env.NEXT_PUBLIC_APP_URL}/pricing`,
+      metadata: { userId: session.user.id },
+      subscription_data: { trial_period_days: 7, metadata: { userId: session.user.id } },
     })
 
-    if (!session.url) {
-      return NextResponse.json(
-        { error: 'Stripe checkout URL was not returned.' },
-        { status: 500 }
-      )
-    }
-
-    return NextResponse.json({ url: session.url })
-  } catch (error) {
-    const message =
-      error instanceof Error ? error.message : 'Unable to start checkout.'
-
-    return NextResponse.json({ error: message }, { status: 500 })
+    return NextResponse.json({ url: checkoutSession.url })
+  } catch (error: any) {
+    console.error('Stripe error:', error)
+    return NextResponse.json({ error: 'Checkout failed' }, { status: 500 })
   }
 }

@@ -1,141 +1,65 @@
-import { NextResponse } from 'next/server'
-import OpenAI from 'openai'
-import { createClient } from '@/lib/supabase-server'
+import { NextRequest, NextResponse } from 'next/server'
+import Anthropic from '@anthropic-ai/sdk'
+import { createServerClient } from '@supabase/ssr'
+import { cookies } from 'next/headers'
 
-type GeneratePayload = {
-  tool?: string
-  gradeLevel?: string
-  subject?: string
-  topic?: string
-  standards?: string
-  duration?: string
-  learningObjective?: string
-  notes?: string
-  studentNeeds?: string
-}
+const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! })
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-})
+const SYSTEM_PROMPT = `You are TeacherPilot, an expert AI assistant built specifically for K–12 teachers.
 
-const FREE_LIMIT = 10
+You create complete, classroom-ready resources — not outlines or suggestions. Everything you produce should be fully written, structured, and immediately usable by a teacher without editing.
 
-function labelTool(tool?: string) {
-  if (!tool) return 'teacher resource'
-  return tool.replaceAll('_', ' ')
-}
+Guidelines:
+- Always format output clearly with headers, sections, and numbered/bulleted content where appropriate
+- Include time estimates where relevant (e.g., "5 min", "15 min")
+- When a teacher mentions ELL, IEP, 504, or differentiation needs — incorporate those automatically
+- For lesson plans: always include objective, materials, bell ringer/hook, instruction, practice, closure, and assessment
+- For quizzes: include answer keys at the end
+- For rubrics: use a 4-3-2-1 scale unless told otherwise
+- For parent emails: be warm, professional, and solution-focused
+- For sub plans: be extremely detailed — assume the sub knows nothing about the class
+- Write at a teacher-to-teacher level. Be concise but complete.`
 
-function buildPrompt(payload: GeneratePayload) {
-  return `
-Create a classroom-ready ${labelTool(payload.tool)} for a teacher.
-
-Requirements:
-- Tool: ${labelTool(payload.tool)}
-- Grade level: ${payload.gradeLevel || 'Not provided'}
-- Subject: ${payload.subject || 'Not provided'}
-- Topic: ${payload.topic || 'Not provided'}
-- Standards: ${payload.standards || 'Not provided'}
-- Duration: ${payload.duration || 'Not provided'}
-- Learning objective: ${payload.learningObjective || 'Not provided'}
-- Student needs / accommodations: ${payload.studentNeeds || 'Not provided'}
-- Additional notes: ${payload.notes || 'Not provided'}
-
-Instructions:
-- Write for a real teacher who needs something usable immediately.
-- Be specific and practical, not vague.
-- Use clear section headings.
-- Include accommodations when relevant.
-- Do not ask follow-up questions.
-- Do not end with an open-ended question.
-- Make the output polished, professional, and classroom-ready.
-`.trim()
-}
-
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   try {
-    const body = (await req.json()) as GeneratePayload
-    const supabase = await createClient()
+    const cookieStore = await cookies()
+    const supabase = createServerClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      {
+        cookies: {
+          getAll()  { return cookieStore.getAll() },
+          setAll(cookiesToSet) {
+            try { cookiesToSet.forEach(({ name, value, options }) => cookieStore.set(name, value, options)) } catch {}
+          },
+        },
+      }
+    )
 
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser()
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const { toolLabel, prompt, userId } = await req.json()
+
+    // Check usage for free users
+    const { data: profile } = await supabase.from('profiles').select('is_pro').eq('id', userId).single()
+    if (!profile?.is_pro) {
+      const start = new Date(); start.setDate(1); start.setHours(0,0,0,0)
+      const { count } = await supabase.from('generations').select('*', { count: 'exact', head: true }).eq('user_id', userId).gte('created_at', start.toISOString())
+      if ((count || 0) >= 10) return NextResponse.json({ error: 'Monthly limit reached. Upgrade to Pro.' }, { status: 403 })
     }
 
-    const { data: profile, error: profileError } = await supabase
-      .from('profiles')
-      .select('plan, generations_used')
-      .eq('id', user.id)
-      .single()
-
-    if (profileError) {
-      return NextResponse.json(
-        { error: 'Unable to load your account usage right now.' },
-        { status: 500 }
-      )
-    }
-
-    const plan = profile?.plan ?? 'free'
-    const generationsUsed = profile?.generations_used ?? 0
-
-    if (plan !== 'pro' && generationsUsed >= FREE_LIMIT) {
-      return NextResponse.json(
-        {
-          error: `You have used all ${FREE_LIMIT} free generations. Upgrade to Pro to keep generating.`,
-        },
-        { status: 403 }
-      )
-    }
-
-    const completion = await openai.chat.completions.create({
-      model: 'gpt-4.1-mini',
-      temperature: 0.7,
-      messages: [
-        {
-          role: 'system',
-          content:
-            'You are TeacherPilot, an expert K-12 teacher assistant that creates classroom-ready materials teachers can use quickly.',
-        },
-        {
-          role: 'user',
-          content: buildPrompt(body),
-        },
-      ],
+    const message = await anthropic.messages.create({
+      model: 'claude-opus-4-5',
+      max_tokens: 2048,
+      system: SYSTEM_PROMPT,
+      messages: [{ role: 'user', content: `Please create a ${toolLabel} for the following:\n\n${prompt}` }],
     })
 
-    const content = completion.choices[0]?.message?.content?.trim()
-
-    if (!content) {
-      return NextResponse.json(
-        { error: 'No content was generated. Please try again.' },
-        { status: 500 }
-      )
-    }
-
-    if (plan !== 'pro') {
-      const nextCount = generationsUsed + 1
-
-      const { error: updateError } = await supabase
-        .from('profiles')
-        .update({ generations_used: nextCount })
-        .eq('id', user.id)
-
-      if (updateError) {
-        return NextResponse.json(
-          { error: 'Content generated, but usage could not be updated.' },
-          { status: 500 }
-        )
-      }
-    }
-
-    return NextResponse.json({ content })
-  } catch (error) {
-    const message =
-      error instanceof Error ? error.message : 'Generation failed.'
-
-    return NextResponse.json({ error: message }, { status: 500 })
+    const output = message.content[0].type === 'text' ? message.content[0].text : ''
+    return NextResponse.json({ output })
+  } catch (error: any) {
+    console.error('Generation error:', error)
+    return NextResponse.json({ error: 'Generation failed. Please try again.' }, { status: 500 })
   }
 }

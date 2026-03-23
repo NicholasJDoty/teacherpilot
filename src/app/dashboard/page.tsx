@@ -1,496 +1,212 @@
+'use client'
+import { useState, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { DashboardShell } from '@/components/dashboard-shell'
-import { requireUser } from '@/lib/auth'
-import { createClient } from '@/lib/supabase-server'
-import { FREE_PLAN_MONTHLY_LIMIT, getPlan, getUsageForMonth } from '@/lib/usage'
+import { createClient } from '@/lib/supabase'
 
-type SavedOutputRow = {
-  id: string
-  tool?: string | null
-  topic?: string | null
-  subject?: string | null
-  grade_level?: string | null
-  created_at?: string | null
-}
+const TOOLS = [
+  { id: 'lesson_plan',     label: 'Lesson Plan',          icon: '📋' },
+  { id: 'unit_plan',       label: 'Unit Plan',            icon: '📐' },
+  { id: 'bell_ringer',     label: 'Bell Ringer',          icon: '🔔' },
+  { id: 'quiz',            label: 'Quiz / Test',          icon: '📝' },
+  { id: 'rubric',          label: 'Rubric',               icon: '📊' },
+  { id: 'parent_email',    label: 'Parent Email',         icon: '✉️' },
+  { id: 'sub_plan',        label: 'Sub Plan 🚨',          icon: '🚌' },
+  { id: 'differentiation', label: 'Differentiation',      icon: '♿' },
+  { id: 'report_comments', label: 'Report Card Comments', icon: '📄' },
+  { id: 'study_guide',     label: 'Study Guide',          icon: '📚' },
+  { id: 'assignment',      label: 'Assignment',           icon: '📎' },
+  { id: 'answer_key',      label: 'Answer Key',           icon: '✅' },
+]
 
-type ReferralRow = {
-  code: string
-  commission_percent: number
-}
+export default function DashboardPage() {
+  const router = useRouter()
+  const [user, setUser]                       = useState<any>(null)
+  const [tool, setTool]                       = useState(TOOLS[0])
+  const [prompt, setPrompt]                   = useState('')
+  const [output, setOutput]                   = useState('')
+  const [loading, setLoading]                 = useState(false)
+  const [saved, setSaved]                     = useState(false)
+  const [library, setLibrary]                 = useState<any[]>([])
+  const [tab, setTab]                         = useState<'generate'|'library'>('generate')
+  const [generationsUsed, setGenerationsUsed] = useState(0)
+  const [isPro, setIsPro]                     = useState(false)
 
-type CommissionRow = {
-  commission_amount: number
-}
+  useEffect(() => {
+    const init = async () => {
+      const supabase = createClient()
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session) { router.push('/login'); return }
+      setUser(session.user)
+      loadLibrary(session.user.id)
+      loadUsage(session.user.id)
+    }
+    init()
+  }, [])
 
-function formatDate(value?: string | null) {
-  if (!value) return 'Recently saved'
+  const loadLibrary = async (uid: string) => {
+    const supabase = createClient()
+    const { data } = await supabase.from('generations').select('*').eq('user_id', uid).order('created_at', { ascending: false }).limit(50)
+    if (data) setLibrary(data)
+  }
 
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return 'Recently saved'
+  const loadUsage = async (uid: string) => {
+    const supabase = createClient()
+    const start = new Date(); start.setDate(1); start.setHours(0,0,0,0)
+    const { count } = await supabase.from('generations').select('*', { count: 'exact', head: true }).eq('user_id', uid).gte('created_at', start.toISOString())
+    setGenerationsUsed(count || 0)
+    const { data: profile } = await supabase.from('profiles').select('is_pro').eq('id', uid).single()
+    if (profile?.is_pro) setIsPro(true)
+  }
 
-  return date.toLocaleDateString()
-}
+  const generate = async () => {
+    if (!prompt.trim() || (!isPro && generationsUsed >= 10)) return
+    setLoading(true); setSaved(false); setOutput('')
+    try {
+      const res  = await fetch('/api/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ toolType: tool.id, toolLabel: tool.label, prompt, userId: user.id }) })
+      const data = await res.json()
+      if (data.output) { setOutput(data.output); setGenerationsUsed(n => n + 1) }
+      else setOutput('Something went wrong. Please try again.')
+    } catch { setOutput('Something went wrong. Please try again.') }
+    finally { setLoading(false) }
+  }
 
-function makeOutputTitle(output: SavedOutputRow) {
-  if (output.topic && output.subject) return `${output.subject} — ${output.topic}`
-  if (output.topic) return output.topic
-  if (output.subject) return output.subject
-  if (output.tool) return output.tool.replaceAll('_', ' ')
-  return 'Saved resource'
-}
+  const save = async () => {
+    if (!output || !user) return
+    const supabase = createClient()
+    const { error } = await supabase.from('generations').insert({ user_id: user.id, tool_type: tool.id, tool_label: tool.label, prompt, output })
+    if (!error) { setSaved(true); loadLibrary(user.id) }
+  }
 
-export default async function DashboardPage() {
-  const user = await requireUser()
-  const supabase = await createClient()
+  const exportPDF = () => {
+    const win = window.open('', '_blank')
+    if (!win) return
+    win.document.write(`<html><head><title>${tool.label}</title><style>body{font-family:Georgia,serif;max-width:800px;margin:40px auto;color:#111;line-height:1.7}pre{white-space:pre-wrap;font-family:inherit}</style></head><body><h1>${tool.label}</h1><p style="color:#666;font-size:.9rem">${prompt}</p><hr/><pre>${output}</pre></body></html>`)
+    win.document.close(); win.print()
+  }
 
-  const plan = await getPlan(user.id)
-  const usage = await getUsageForMonth(user.id)
+  const logout = async () => { const s = createClient(); await s.auth.signOut(); router.push('/') }
 
-  const { data: savedData } = await supabase
-    .from('saved_outputs')
-    .select('id, tool, topic, subject, grade_level, created_at')
-    .eq('user_id', user.id)
-    .order('created_at', { ascending: false })
-    .limit(8)
-
-  const { data: referralData } = await supabase
-    .from('referrals')
-    .select('code, commission_percent')
-    .eq('user_id', user.id)
-    .maybeSingle()
-
-  const { data: commissionData } = await supabase
-    .from('commissions')
-    .select('commission_amount')
-    .eq('referrer_user_id', user.id)
-
-  const savedOutputs = (savedData ?? []) as SavedOutputRow[]
-  const referral = (referralData ?? null) as ReferralRow | null
-  const commissions = (commissionData ?? []) as CommissionRow[]
-
-  const usageLabel =
-    plan === 'pro' ? 'Unlimited' : `${usage} / ${FREE_PLAN_MONTHLY_LIMIT}`
-  const usagePercent =
-    plan === 'pro' ? 100 : Math.min((usage / FREE_PLAN_MONTHLY_LIMIT) * 100, 100)
-
-  const totalCommissionCents = commissions.reduce(
-    (sum, item) => sum + (item.commission_amount ?? 0),
-    0
-  )
-  const totalCommissionDollars = (totalCommissionCents / 100).toFixed(2)
-  const referralLink =
-    referral && process.env.NEXT_PUBLIC_APP_URL
-      ? `${process.env.NEXT_PUBLIC_APP_URL}/?ref=${referral.code}`
-      : null
+  const limitReached = !isPro && generationsUsed >= 10
 
   return (
-    <DashboardShell>
-      <div style={{ marginBottom: '28px' }}>
-        <p
-          style={{
-            margin: '0 0 8px 0',
-            color: '#64748b',
-            fontSize: '13px',
-            fontWeight: 700,
-            textTransform: 'uppercase',
-            letterSpacing: '0.04em',
-          }}
-        >
-          TeacherPilot workspace
-        </p>
+    <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
 
-        <h1
-          style={{
-            margin: '0 0 10px 0',
-            fontSize: '32px',
-            fontWeight: 800,
-            color: '#0f172a',
-          }}
-        >
-          Welcome back
-        </h1>
-
-        <p
-          style={{
-            margin: 0,
-            color: '#475569',
-            fontSize: '15px',
-            lineHeight: 1.7,
-            maxWidth: '760px',
-          }}
-        >
-          Generate classroom materials quickly, reopen saved work, and keep your teaching workflow in one place.
-        </p>
-      </div>
-
-      <div
-        style={{
-          display: 'grid',
-          gap: '12px',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-          marginBottom: '24px',
-        }}
-      >
-        <Link href="/generate?tool=lesson_plan" className="btn-primary">
-          Lesson Plan
+      {/* Header */}
+      <header style={{ borderBottom: '1px solid var(--border)', padding: '0 24px', height: 60, display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'var(--bg-card)', position: 'sticky', top: 0, zIndex: 50 }}>
+        <Link href="/" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div style={{ width: 28, height: 28, background: 'var(--accent)', borderRadius: 7, display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: '0.85rem', color: '#0D0F12' }}>T</div>
+          <span style={{ fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: '1rem' }}>TeacherPilot</span>
         </Link>
-        <Link href="/generate?tool=quiz_test" className="btn-secondary">
-          Quiz / Test
-        </Link>
-        <Link href="/generate?tool=slide_deck" className="btn-secondary">
-          Teacher Slides
-        </Link>
-        <Link href="/generate?tool=parent_email" className="btn-secondary">
-          Parent Email
-        </Link>
-      </div>
-
-      <div
-        style={{
-          display: 'grid',
-          gap: '18px',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
-          marginBottom: '26px',
-        }}
-      >
-        <div className="card" style={{ padding: '22px' }}>
-          <p
-            style={{
-              margin: '0 0 8px 0',
-              fontSize: '12px',
-              fontWeight: 700,
-              color: '#64748b',
-              textTransform: 'uppercase',
-              letterSpacing: '0.04em',
-            }}
-          >
-            Current plan
-          </p>
-
-          <h2
-            style={{
-              margin: '0 0 6px 0',
-              fontSize: '28px',
-              fontWeight: 800,
-              color: '#0f172a',
-            }}
-          >
-            {plan === 'pro' ? 'Pro' : 'Free'}
-          </h2>
-
-          <p style={{ margin: 0, color: '#475569', lineHeight: 1.6 }}>
-            {plan === 'pro'
-              ? 'Unlimited classroom generation access.'
-              : 'Free plan with limited monthly generations.'}
-          </p>
-        </div>
-
-        <div className="card" style={{ padding: '22px' }}>
-          <p
-            style={{
-              margin: '0 0 8px 0',
-              fontSize: '12px',
-              fontWeight: 700,
-              color: '#64748b',
-              textTransform: 'uppercase',
-              letterSpacing: '0.04em',
-            }}
-          >
-            This month’s usage
-          </p>
-
-          <h2
-            style={{
-              margin: '0 0 12px 0',
-              fontSize: '28px',
-              fontWeight: 800,
-              color: '#0f172a',
-            }}
-          >
-            {usageLabel}
-          </h2>
-
-          <div
-            style={{
-              width: '100%',
-              height: '10px',
-              background: '#e2e8f0',
-              borderRadius: '999px',
-              overflow: 'hidden',
-              marginBottom: '12px',
-            }}
-          >
-            <div
-              style={{
-                width: `${usagePercent}%`,
-                height: '100%',
-                background: '#0f172a',
-              }}
-            />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div style={{ padding: '4px 12px', borderRadius: 999, background: limitReached ? 'rgba(248,113,113,0.1)' : 'var(--bg-elevated)', border: `1px solid ${limitReached ? 'rgba(248,113,113,0.3)' : 'var(--border)'}`, fontSize: '0.78rem', color: limitReached ? 'var(--red)' : 'var(--text-muted)' }}>
+            {isPro ? '∞ Pro' : `${generationsUsed}/10 this month`}
           </div>
-
-          {plan !== 'pro' && usage >= FREE_PLAN_MONTHLY_LIMIT && (
-            <Link href="/pricing" className="btn-primary">
-              Upgrade to Pro
-            </Link>
-          )}
+          {!isPro && <Link href="/pricing" className="btn btn-primary btn-sm">Upgrade to Pro</Link>}
+          <button onClick={logout} className="btn btn-ghost btn-sm">Log out</button>
         </div>
+      </header>
 
-        <div className="card" style={{ padding: '22px' }}>
-          <p
-            style={{
-              margin: '0 0 8px 0',
-              fontSize: '12px',
-              fontWeight: 700,
-              color: '#64748b',
-              textTransform: 'uppercase',
-              letterSpacing: '0.04em',
-            }}
-          >
-            Quick actions
-          </p>
+      <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
 
-          <div style={{ display: 'grid', gap: '10px' }}>
-            <Link href="/generate" className="btn-primary">
-              Generate new resource
-            </Link>
-            <Link href="/workflows" className="btn-secondary">
-              Open workflow hub
-            </Link>
-            <Link href="/history" className="btn-secondary">
-              View saved history
-            </Link>
+        {/* Sidebar */}
+        <aside style={{ width: 220, borderRight: '1px solid var(--border)', padding: '16px 12px', overflowY: 'auto', background: 'var(--bg-card)', display: 'flex', flexDirection: 'column', gap: 4, flexShrink: 0 }}>
+          <div style={{ fontSize: '0.7rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', padding: '4px 8px', marginBottom: 4 }}>Tools</div>
+          {TOOLS.map(t => (
+            <button key={t.id} onClick={() => { setTool(t); setTab('generate'); setOutput(''); setSaved(false) }}
+              style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', borderRadius: 8, border: 'none', cursor: 'pointer', textAlign: 'left', background: tool.id === t.id ? 'var(--accent-dim)' : 'transparent', color: tool.id === t.id ? 'var(--accent)' : 'var(--text-secondary)', fontSize: '0.85rem', fontWeight: tool.id === t.id ? 600 : 400, transition: 'all 0.15s', width: '100%' }}>
+              <span>{t.icon}</span>{t.label}
+            </button>
+          ))}
+          <div style={{ marginTop: 'auto', paddingTop: 16 }}>
+            <button onClick={() => setTab('library')}
+              style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', borderRadius: 8, border: 'none', cursor: 'pointer', width: '100%', textAlign: 'left', background: tab === 'library' ? 'var(--bg-elevated)' : 'transparent', color: tab === 'library' ? 'var(--text-primary)' : 'var(--text-muted)', fontSize: '0.85rem' }}>
+              <span>📁</span> My Library
+              {library.length > 0 && <span style={{ marginLeft: 'auto', background: 'var(--border)', borderRadius: 999, padding: '1px 7px', fontSize: '0.72rem', color: 'var(--text-muted)' }}>{library.length}</span>}
+            </button>
           </div>
-        </div>
-      </div>
+        </aside>
 
-      <div
-        style={{
-          display: 'grid',
-          gap: '20px',
-          gridTemplateColumns: 'minmax(0, 1.35fr) minmax(320px, 0.85fr)',
-        }}
-      >
-        <div className="card" style={{ padding: '22px' }}>
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              gap: '12px',
-              marginBottom: '16px',
-              flexWrap: 'wrap',
-            }}
-          >
-            <div>
-              <h2
-                style={{
-                  margin: '0 0 4px 0',
-                  fontSize: '22px',
-                  fontWeight: 800,
-                  color: '#0f172a',
-                }}
-              >
-                Recent saved materials
-              </h2>
+        {/* Main */}
+        <main style={{ flex: 1, overflow: 'auto', padding: '28px 32px' }}>
+          {tab === 'generate' ? (
+            <div style={{ maxWidth: 800, margin: '0 auto' }}>
+              <div style={{ marginBottom: 24 }}>
+                <h2 style={{ fontSize: '1.4rem', marginBottom: 4 }}>{tool.icon} {tool.label}</h2>
+                <p style={{ fontSize: '0.88rem', color: 'var(--text-muted)' }}>Describe what you need — grade, subject, topic, accommodations, length.</p>
+              </div>
 
-              <p style={{ margin: 0, color: '#64748b', lineHeight: 1.6 }}>
-                Saved outputs teachers can reopen and reuse.
-              </p>
-            </div>
+              {limitReached && (
+                <div style={{ padding: '16px 20px', background: 'rgba(248,113,113,0.08)', border: '1px solid rgba(248,113,113,0.25)', borderRadius: 'var(--radius-md)', marginBottom: 20, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
+                  <div>
+                    <div style={{ fontWeight: 600, color: 'var(--red)', fontSize: '0.9rem', marginBottom: 2 }}>Monthly limit reached</div>
+                    <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>Upgrade to Pro for unlimited generations.</div>
+                  </div>
+                  <Link href="/pricing" className="btn btn-primary btn-sm">Upgrade →</Link>
+                </div>
+              )}
 
-            <Link href="/history" style={{ color: '#0f172a', fontWeight: 700 }}>
-              View all →
-            </Link>
-          </div>
+              <div style={{ marginBottom: 16 }}>
+                <label className="label">What do you need?</label>
+                <textarea className="input" style={{ minHeight: 130 }} placeholder="Example: 5th grade science, The Water Cycle, 45-minute lesson, needs ELL supports, exit ticket, and homework" value={prompt} onChange={e => setPrompt(e.target.value)} disabled={limitReached} />
+              </div>
 
-          {savedOutputs.length === 0 ? (
-            <div
-              style={{
-                border: '1px dashed #cbd5e1',
-                borderRadius: '16px',
-                padding: '20px',
-                color: '#64748b',
-                lineHeight: 1.7,
-              }}
-            >
-              No saved materials yet. Generate something, click save, and it will show up here.
-            </div>
-          ) : (
-            <div style={{ display: 'grid', gap: '12px' }}>
-              {savedOutputs.map((output) => (
-                <Link
-                  key={output.id}
-                  href={`/history/${output.id}`}
-                  style={{
-                    display: 'block',
-                    border: '1px solid #e2e8f0',
-                    borderRadius: '16px',
-                    padding: '16px',
-                    background: '#ffffff',
-                  }}
-                >
-                  <div
-                    style={{
-                      display: 'flex',
-                      alignItems: 'flex-start',
-                      justifyContent: 'space-between',
-                      gap: '14px',
-                      flexWrap: 'wrap',
-                    }}
-                  >
-                    <div>
-                      <h3
-                        style={{
-                          margin: '0 0 6px 0',
-                          fontSize: '17px',
-                          fontWeight: 700,
-                          color: '#0f172a',
-                        }}
-                      >
-                        {makeOutputTitle(output)}
-                      </h3>
+              <button className="btn btn-primary" onClick={generate} disabled={loading || !prompt.trim() || limitReached} style={{ opacity: (loading || !prompt.trim() || limitReached) ? 0.6 : 1 }}>
+                {loading ? '⟳ Generating…' : `Generate ${tool.label} →`}
+              </button>
 
-                      <p
-                        style={{
-                          margin: '0 0 4px 0',
-                          color: '#475569',
-                          lineHeight: 1.6,
-                          textTransform: 'capitalize',
-                        }}
-                      >
-                        {(output.tool ?? 'resource').replaceAll('_', ' ')}
-                      </p>
-
-                      <p
-                        style={{
-                          margin: 0,
-                          color: '#64748b',
-                          fontSize: '13px',
-                        }}
-                      >
-                        {output.grade_level ?? 'K–12'} • {formatDate(output.created_at)}
-                      </p>
-                    </div>
-
-                    <div
-                      style={{
-                        borderRadius: '999px',
-                        background: '#f1f5f9',
-                        color: '#334155',
-                        padding: '6px 10px',
-                        fontSize: '12px',
-                        fontWeight: 700,
-                      }}
-                    >
-                      Open
+              {output && (
+                <div style={{ marginTop: 32 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, flexWrap: 'wrap', gap: 10 }}>
+                    <div style={{ fontWeight: 600, color: 'var(--text-primary)', fontSize: '0.95rem' }}>✦ Generated output</div>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button onClick={() => navigator.clipboard.writeText(output)} className="btn btn-secondary btn-sm">Copy</button>
+                      <button onClick={exportPDF} className="btn btn-secondary btn-sm">Export PDF</button>
+                      <button onClick={save} className="btn btn-sm" style={{ background: saved ? 'var(--green-dim)' : 'var(--accent-dim)', color: saved ? 'var(--green)' : 'var(--accent)', border: `1px solid ${saved ? 'rgba(62,207,142,0.3)' : 'rgba(245,166,35,0.3)'}` }}>
+                        {saved ? '✓ Saved' : 'Save to library'}
+                      </button>
                     </div>
                   </div>
-                </Link>
-              ))}
+                  <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', padding: '24px 28px', fontSize: '0.9rem', lineHeight: 1.8, color: 'var(--text-secondary)', whiteSpace: 'pre-wrap', maxHeight: 600, overflowY: 'auto' }}>
+                    {output}
+                  </div>
+                </div>
+              )}
             </div>
-          )}
-        </div>
-
-        <div style={{ display: 'grid', gap: '20px' }}>
-          {referral && (
-            <div className="card" style={{ padding: '22px' }}>
-              <h2
-                style={{
-                  margin: '0 0 10px 0',
-                  fontSize: '20px',
-                  fontWeight: 800,
-                  color: '#0f172a',
-                }}
-              >
-                Partner link
-              </h2>
-
-              <p style={{ margin: '0 0 8px 0', color: '#475569', lineHeight: 1.7 }}>
-                Referral code: <strong>{referral.code}</strong>
-              </p>
-
-              <p style={{ margin: '0 0 12px 0', color: '#475569', lineHeight: 1.7 }}>
-                Commission rate: <strong>{referral.commission_percent}%</strong>
-              </p>
-
-              {referralLink && (
-                <div
-                  style={{
-                    border: '1px solid #e2e8f0',
-                    borderRadius: '14px',
-                    padding: '12px',
-                    background: '#f8fafc',
-                    wordBreak: 'break-all',
-                    color: '#334155',
-                    fontSize: '14px',
-                    lineHeight: 1.6,
-                  }}
-                >
-                  {referralLink}
+          ) : (
+            <div style={{ maxWidth: 800, margin: '0 auto' }}>
+              <h2 style={{ fontSize: '1.4rem', marginBottom: 6 }}>📁 My Library</h2>
+              <p style={{ fontSize: '0.88rem', color: 'var(--text-muted)', marginBottom: 28 }}>All your saved resources in one place.</p>
+              {library.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '60px 24px', background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)' }}>
+                  <div style={{ fontSize: '2.5rem', marginBottom: 12 }}>📂</div>
+                  <p style={{ color: 'var(--text-muted)' }}>No saved resources yet. Generate something and hit Save!</p>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  {library.map(item => (
+                    <div key={item.id} className="card" style={{ padding: '20px 24px', cursor: 'pointer' }}
+                      onClick={() => { setTool(TOOLS.find(t => t.id === item.tool_type) || TOOLS[0]); setPrompt(item.prompt); setOutput(item.output); setTab('generate'); setSaved(true) }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                            <span className="badge badge-accent" style={{ fontSize: '0.7rem' }}>{item.tool_label}</span>
+                            <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{new Date(item.created_at).toLocaleDateString()}</span>
+                          </div>
+                          <div style={{ fontSize: '0.88rem', color: 'var(--text-primary)', fontWeight: 500, marginBottom: 4 }}>{item.prompt.slice(0, 100)}{item.prompt.length > 100 ? '…' : ''}</div>
+                          <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{item.output.slice(0, 120)}…</div>
+                        </div>
+                        <div style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>Open →</div>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               )}
             </div>
           )}
-
-          {referral && (
-            <div className="card" style={{ padding: '22px' }}>
-              <h2
-                style={{
-                  margin: '0 0 10px 0',
-                  fontSize: '20px',
-                  fontWeight: 800,
-                  color: '#0f172a',
-                }}
-              >
-                Tracked commissions
-              </h2>
-
-              <p style={{ margin: '0 0 12px 0', color: '#475569', lineHeight: 1.7 }}>
-                Total commission value recorded from paid referrals.
-              </p>
-
-              <div
-                style={{
-                  fontSize: '28px',
-                  fontWeight: 800,
-                  color: '#0f172a',
-                }}
-              >
-                ${totalCommissionDollars}
-              </div>
-            </div>
-          )}
-
-          <div className="card" style={{ padding: '22px' }}>
-            <h2
-              style={{
-                margin: '0 0 12px 0',
-                fontSize: '20px',
-                fontWeight: 800,
-                color: '#0f172a',
-              }}
-            >
-              Best workflows
-            </h2>
-
-            <div style={{ display: 'grid', gap: '10px' }}>
-              <Link href="/generate?tool=lesson_bundle" className="btn-secondary">
-                Full lesson bundle
-              </Link>
-              <Link href="/generate?tool=slide_deck" className="btn-secondary">
-                Teacher slides
-              </Link>
-              <Link href="/generate?tool=quiz_test" className="btn-secondary">
-                Quiz / test
-              </Link>
-              <Link href="/generate?tool=parent_email" className="btn-secondary">
-                Parent communication
-              </Link>
-            </div>
-          </div>
-        </div>
+        </main>
       </div>
-    </DashboardShell>
+      <style>{`@media(max-width:640px){aside{display:none}}`}</style>
+    </div>
   )
 }
