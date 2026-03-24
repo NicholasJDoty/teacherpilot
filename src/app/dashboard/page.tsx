@@ -31,31 +31,56 @@ export default function DashboardPage() {
   const [tab, setTab]                         = useState<'generate'|'library'>('generate')
   const [generationsUsed, setGenerationsUsed] = useState(0)
   const [isPro, setIsPro]                     = useState(false)
+  const [upgraded, setUpgraded]               = useState(false)
 
   useEffect(() => {
     const init = async () => {
       const supabase = createClient()
-      const { data: { session } } = await supabase.auth.getSession()
-      if (!session) { router.push('/login'); return }
-      setUser(session.user)
-      loadLibrary(session.user.id)
-      loadUsage(session.user.id)
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) { router.push('/login'); return }
+      setUser(user)
+      loadLibrary(user.id)
+      loadUsage(user.id)
+
+      // Show success message if coming from Stripe
+      const params = new URLSearchParams(window.location.search)
+      if (params.get('upgraded') === 'true') {
+        setUpgraded(true)
+        setTimeout(() => setUpgraded(false), 5000)
+        // Remove param from URL
+        window.history.replaceState({}, '', '/dashboard')
+      }
     }
     init()
   }, [])
 
   const loadLibrary = async (uid: string) => {
     const supabase = createClient()
-    const { data } = await supabase.from('generations').select('*').eq('user_id', uid).order('created_at', { ascending: false }).limit(50)
+    const { data } = await supabase
+      .from('generations')
+      .select('*')
+      .eq('user_id', uid)
+      .order('created_at', { ascending: false })
+      .limit(50)
     if (data) setLibrary(data)
   }
 
   const loadUsage = async (uid: string) => {
     const supabase = createClient()
-    const start = new Date(); start.setDate(1); start.setHours(0,0,0,0)
-    const { count } = await supabase.from('generations').select('*', { count: 'exact', head: true }).eq('user_id', uid).gte('created_at', start.toISOString())
+    const start = new Date()
+    start.setDate(1); start.setHours(0,0,0,0)
+    const { count } = await supabase
+      .from('generations')
+      .select('*', { count: 'exact', head: true })
+      .eq('user_id', uid)
+      .gte('created_at', start.toISOString())
     setGenerationsUsed(count || 0)
-    const { data: profile } = await supabase.from('profiles').select('is_pro').eq('id', uid).single()
+
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('is_pro')
+      .eq('id', uid)
+      .single()
     if (profile?.is_pro) setIsPro(true)
   }
 
@@ -63,18 +88,27 @@ export default function DashboardPage() {
     if (!prompt.trim() || (!isPro && generationsUsed >= 10)) return
     setLoading(true); setSaved(false); setOutput('')
     try {
-      const res  = await fetch('/api/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ toolType: tool.id, toolLabel: tool.label, prompt, userId: user.id }) })
+      const res  = await fetch('/api/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ toolType: tool.id, toolLabel: tool.label, prompt, userId: user.id }),
+      })
       const data = await res.json()
       if (data.output) { setOutput(data.output); setGenerationsUsed(n => n + 1) }
       else setOutput('Something went wrong. Please try again.')
-    } catch { setOutput('Something went wrong. Please try again.') }
-    finally { setLoading(false) }
+    } catch {
+      setOutput('Something went wrong. Please try again.')
+    } finally {
+      setLoading(false)
+    }
   }
 
   const save = async () => {
     if (!output || !user) return
     const supabase = createClient()
-    const { error } = await supabase.from('generations').insert({ user_id: user.id, tool_type: tool.id, tool_label: tool.label, prompt, output })
+    const { error } = await supabase.from('generations').insert({
+      user_id: user.id, tool_type: tool.id, tool_label: tool.label, prompt, output,
+    })
     if (!error) { setSaved(true); loadLibrary(user.id) }
   }
 
@@ -85,12 +119,23 @@ export default function DashboardPage() {
     win.document.close(); win.print()
   }
 
-  const logout = async () => { const s = createClient(); await s.auth.signOut(); router.push('/') }
+  const logout = async () => {
+    const supabase = createClient()
+    await supabase.auth.signOut()
+    router.push('/')
+  }
 
   const limitReached = !isPro && generationsUsed >= 10
 
   return (
     <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
+
+      {/* Upgrade success banner */}
+      {upgraded && (
+        <div style={{ background: 'var(--green-dim)', borderBottom: '1px solid rgba(62,207,142,0.3)', padding: '12px 24px', textAlign: 'center', fontSize: '0.9rem', color: 'var(--green)', fontWeight: 500 }}>
+          🎉 Welcome to Pro! Unlimited generations unlocked.
+        </div>
+      )}
 
       {/* Header */}
       <header style={{ borderBottom: '1px solid var(--border)', padding: '0 24px', height: 60, display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'var(--bg-card)', position: 'sticky', top: 0, zIndex: 50 }}>
@@ -102,7 +147,9 @@ export default function DashboardPage() {
           <div style={{ padding: '4px 12px', borderRadius: 999, background: limitReached ? 'rgba(248,113,113,0.1)' : 'var(--bg-elevated)', border: `1px solid ${limitReached ? 'rgba(248,113,113,0.3)' : 'var(--border)'}`, fontSize: '0.78rem', color: limitReached ? 'var(--red)' : 'var(--text-muted)' }}>
             {isPro ? '∞ Pro' : `${generationsUsed}/10 this month`}
           </div>
-          {!isPro && <Link href="/pricing" className="btn btn-primary btn-sm">Upgrade to Pro</Link>}
+          {!isPro && (
+            <Link href="/pricing" className="btn btn-primary btn-sm">Upgrade to Pro</Link>
+          )}
           <button onClick={logout} className="btn btn-ghost btn-sm">Log out</button>
         </div>
       </header>
@@ -113,7 +160,8 @@ export default function DashboardPage() {
         <aside style={{ width: 220, borderRight: '1px solid var(--border)', padding: '16px 12px', overflowY: 'auto', background: 'var(--bg-card)', display: 'flex', flexDirection: 'column', gap: 4, flexShrink: 0 }}>
           <div style={{ fontSize: '0.7rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', padding: '4px 8px', marginBottom: 4 }}>Tools</div>
           {TOOLS.map(t => (
-            <button key={t.id} onClick={() => { setTool(t); setTab('generate'); setOutput(''); setSaved(false) }}
+            <button key={t.id}
+              onClick={() => { setTool(t); setTab('generate'); setOutput(''); setSaved(false) }}
               style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', borderRadius: 8, border: 'none', cursor: 'pointer', textAlign: 'left', background: tool.id === t.id ? 'var(--accent-dim)' : 'transparent', color: tool.id === t.id ? 'var(--accent)' : 'var(--text-secondary)', fontSize: '0.85rem', fontWeight: tool.id === t.id ? 600 : 400, transition: 'all 0.15s', width: '100%' }}>
               <span>{t.icon}</span>{t.label}
             </button>
@@ -122,7 +170,9 @@ export default function DashboardPage() {
             <button onClick={() => setTab('library')}
               style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', borderRadius: 8, border: 'none', cursor: 'pointer', width: '100%', textAlign: 'left', background: tab === 'library' ? 'var(--bg-elevated)' : 'transparent', color: tab === 'library' ? 'var(--text-primary)' : 'var(--text-muted)', fontSize: '0.85rem' }}>
               <span>📁</span> My Library
-              {library.length > 0 && <span style={{ marginLeft: 'auto', background: 'var(--border)', borderRadius: 999, padding: '1px 7px', fontSize: '0.72rem', color: 'var(--text-muted)' }}>{library.length}</span>}
+              {library.length > 0 && (
+                <span style={{ marginLeft: 'auto', background: 'var(--border)', borderRadius: 999, padding: '1px 7px', fontSize: '0.72rem', color: 'var(--text-muted)' }}>{library.length}</span>
+              )}
             </button>
           </div>
         </aside>
@@ -148,10 +198,14 @@ export default function DashboardPage() {
 
               <div style={{ marginBottom: 16 }}>
                 <label className="label">What do you need?</label>
-                <textarea className="input" style={{ minHeight: 130 }} placeholder="Example: 5th grade science, The Water Cycle, 45-minute lesson, needs ELL supports, exit ticket, and homework" value={prompt} onChange={e => setPrompt(e.target.value)} disabled={limitReached} />
+                <textarea className="input" style={{ minHeight: 130 }}
+                  placeholder="Example: 5th grade science, The Water Cycle, 45-minute lesson, needs ELL supports, exit ticket, and homework"
+                  value={prompt} onChange={e => setPrompt(e.target.value)} disabled={limitReached} />
               </div>
 
-              <button className="btn btn-primary" onClick={generate} disabled={loading || !prompt.trim() || limitReached} style={{ opacity: (loading || !prompt.trim() || limitReached) ? 0.6 : 1 }}>
+              <button className="btn btn-primary" onClick={generate}
+                disabled={loading || !prompt.trim() || limitReached}
+                style={{ opacity: (loading || !prompt.trim() || limitReached) ? 0.6 : 1 }}>
                 {loading ? '⟳ Generating…' : `Generate ${tool.label} →`}
               </button>
 
@@ -162,7 +216,8 @@ export default function DashboardPage() {
                     <div style={{ display: 'flex', gap: 8 }}>
                       <button onClick={() => navigator.clipboard.writeText(output)} className="btn btn-secondary btn-sm">Copy</button>
                       <button onClick={exportPDF} className="btn btn-secondary btn-sm">Export PDF</button>
-                      <button onClick={save} className="btn btn-sm" style={{ background: saved ? 'var(--green-dim)' : 'var(--accent-dim)', color: saved ? 'var(--green)' : 'var(--accent)', border: `1px solid ${saved ? 'rgba(62,207,142,0.3)' : 'rgba(245,166,35,0.3)'}` }}>
+                      <button onClick={save} className="btn btn-sm"
+                        style={{ background: saved ? 'var(--green-dim)' : 'var(--accent-dim)', color: saved ? 'var(--green)' : 'var(--accent)', border: `1px solid ${saved ? 'rgba(62,207,142,0.3)' : 'rgba(245,166,35,0.3)'}` }}>
                         {saved ? '✓ Saved' : 'Save to library'}
                       </button>
                     </div>

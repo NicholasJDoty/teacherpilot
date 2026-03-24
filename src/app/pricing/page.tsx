@@ -1,6 +1,10 @@
+'use client'
+import { useState } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import Navbar from '@/components/Navbar'
 import Footer from '@/components/Footer'
+import { createClient } from '@/lib/supabase'
 
 const freeFeatures = ['10 generations per month','All 12 tool types','Save & reopen outputs','PDF export','Copy to clipboard']
 const proFeatures  = ['Unlimited generations','All 12 tool types','Full resource library','PDF export','Standards alignment tags','One-click differentiation (ELL/IEP/Advanced)','Spanish translation for parent emails','Priority support']
@@ -13,6 +17,49 @@ const faqs = [
 ]
 
 export default function PricingPage() {
+  const router = useRouter()
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+
+  const handleUpgrade = async (plan: 'monthly' | 'annual') => {
+    setLoading(true)
+    setError('')
+
+    // Check if logged in first
+    const supabase = createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+
+    if (!user) {
+      router.push('/signup?next=pricing')
+      return
+    }
+
+    try {
+      const res = await fetch('/api/checkout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ plan }),
+      })
+
+      const data = await res.json()
+
+      if (data.redirect) {
+        router.push('/login?next=pricing')
+        return
+      }
+
+      if (data.url) {
+        window.location.href = data.url
+      } else {
+        setError('Something went wrong. Please try again.')
+        setLoading(false)
+      }
+    } catch {
+      setError('Something went wrong. Please try again.')
+      setLoading(false)
+    }
+  }
+
   return (
     <>
       <Navbar />
@@ -24,7 +71,9 @@ export default function PricingPage() {
             Pay for it only if it{' '}
             <em style={{ color: 'var(--accent)', fontStyle: 'italic' }}>earns its place</em>
           </h1>
-          <p style={{ maxWidth: 440, margin: '0 auto', fontSize: '1.05rem' }}>Start free and upgrade when TeacherPilot becomes part of your weekly routine.</p>
+          <p style={{ maxWidth: 440, margin: '0 auto', fontSize: '1.05rem' }}>
+            Start free and upgrade when TeacherPilot becomes part of your weekly routine.
+          </p>
         </div>
 
         {/* Cards */}
@@ -40,7 +89,9 @@ export default function PricingPage() {
               </div>
               <p style={{ fontSize: '0.9rem', marginTop: 10, color: 'var(--text-muted)' }}>For proving the value before you commit.</p>
             </div>
-            <Link href="/signup" className="btn btn-secondary" style={{ width: '100%', justifyContent: 'center', marginBottom: 28 }}>Create free account</Link>
+            <Link href="/signup" className="btn btn-secondary" style={{ width: '100%', justifyContent: 'center', marginBottom: 28 }}>
+              Create free account
+            </Link>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               {freeFeatures.map((f, i) => (
                 <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -65,7 +116,32 @@ export default function PricingPage() {
               <div style={{ fontSize: '0.82rem', color: 'var(--green)', marginTop: 4 }}>Or $99/year — save 41%</div>
               <p style={{ fontSize: '0.9rem', marginTop: 10, color: 'var(--text-muted)' }}>For teachers who use it every week.</p>
             </div>
-            <Link href="/signup?plan=pro" className="btn btn-primary" style={{ width: '100%', justifyContent: 'center', marginBottom: 28 }}>Start Pro free for 7 days →</Link>
+
+            {error && (
+              <div style={{ padding: '10px 14px', background: 'rgba(248,113,113,0.1)', border: '1px solid rgba(248,113,113,0.3)', borderRadius: '6px', fontSize: '0.85rem', color: 'var(--red)', marginBottom: 16 }}>
+                {error}
+              </div>
+            )}
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 28 }}>
+              <button
+                onClick={() => handleUpgrade('monthly')}
+                disabled={loading}
+                className="btn btn-primary"
+                style={{ width: '100%', justifyContent: 'center', opacity: loading ? 0.7 : 1 }}
+              >
+                {loading ? 'Loading…' : 'Start Pro free for 7 days →'}
+              </button>
+              <button
+                onClick={() => handleUpgrade('annual')}
+                disabled={loading}
+                className="btn btn-secondary"
+                style={{ width: '100%', justifyContent: 'center', fontSize: '0.85rem' }}
+              >
+                Get annual plan — $99/year
+              </button>
+            </div>
+
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               {proFeatures.map((f, i) => (
                 <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
