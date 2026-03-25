@@ -4,12 +4,24 @@ import Link from 'next/link'
 import { createClient } from '@/lib/supabase'
 
 export default function SignupPage() {
-  const [email, setEmail]         = useState('')
-  const [password, setPassword]   = useState('')
-  const [loading, setLoading]     = useState(false)
+  const [email, setEmail]               = useState('')
+  const [password, setPassword]         = useState('')
+  const [loading, setLoading]           = useState(false)
   const [googleLoading, setGoogleLoading] = useState(false)
-  const [error, setError]         = useState('')
-  const [success, setSuccess]     = useState(false)
+  const [error, setError]               = useState('')
+  const [success, setSuccess]           = useState(false)
+
+  const sendWelcomeEmail = async (email: string) => {
+    try {
+      await fetch('/api/welcome-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email }),
+      })
+    } catch {
+      // Silently fail — don't block signup if email fails
+    }
+  }
 
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -20,8 +32,13 @@ export default function SignupPage() {
       email, password,
       options: { emailRedirectTo: `${location.origin}/auth/callback` },
     })
-    if (error) { setError(error.message); setLoading(false) }
-    else setSuccess(true)
+    if (error) {
+      setError(error.message)
+      setLoading(false)
+    } else {
+      await sendWelcomeEmail(email)
+      setSuccess(true)
+    }
   }
 
   const handleGoogle = async () => {
@@ -30,21 +47,21 @@ export default function SignupPage() {
     const supabase = createClient()
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
-      options: {
-        redirectTo: `${location.origin}/auth/callback`,
-      },
+      options: { redirectTo: `${location.origin}/auth/callback` },
     })
     if (error) { setError(error.message); setGoogleLoading(false) }
+    // Note: for Google signups the welcome email is sent via the auth callback
   }
 
   if (success) {
     return (
-      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24, background: 'var(--bg)' }}>
         <div style={{ textAlign: 'center', maxWidth: 440 }}>
           <div style={{ fontSize: '3rem', marginBottom: 20 }}>✉️</div>
           <h2 style={{ marginBottom: 12 }}>Check your inbox</h2>
-          <p style={{ color: 'var(--text-muted)', fontSize: '0.95rem' }}>
-            We sent a confirmation link to <strong style={{ color: 'var(--text-primary)' }}>{email}</strong>. Click it to activate your account.
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.95rem', lineHeight: 1.7 }}>
+            We sent a confirmation link to <strong style={{ color: 'var(--text-primary)' }}>{email}</strong>.
+            <br />A welcome email is on its way too.
           </p>
         </div>
       </div>
@@ -56,7 +73,6 @@ export default function SignupPage() {
       <div style={{ position: 'fixed', top: '30%', left: '50%', transform: 'translateX(-50%)', width: 500, height: 300, background: 'radial-gradient(ellipse, rgba(245,166,35,0.06) 0%, transparent 70%)', pointerEvents: 'none' }} />
 
       <div style={{ width: '100%', maxWidth: 440, animation: 'fadeUp 0.5s ease both' }}>
-        {/* Logo */}
         <div style={{ textAlign: 'center', marginBottom: 36 }}>
           <Link href="/" style={{ display: 'inline-flex', alignItems: 'center', gap: 10 }}>
             <div style={{ width: 36, height: 36, background: 'var(--accent)', borderRadius: 9, display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: '1.1rem', color: '#0D0F12' }}>T</div>
@@ -72,17 +88,8 @@ export default function SignupPage() {
           </p>
 
           {/* Google button */}
-          <button
-            onClick={handleGoogle}
-            disabled={googleLoading}
-            style={{
-              width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
-              padding: '11px 20px', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-light)',
-              background: 'var(--bg-elevated)', color: 'var(--text-primary)', fontSize: '0.95rem', fontWeight: 500,
-              cursor: 'pointer', transition: 'all 0.2s', marginBottom: 20,
-              opacity: googleLoading ? 0.7 : 1,
-            }}
-          >
+          <button onClick={handleGoogle} disabled={googleLoading}
+            style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, padding: '11px 20px', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-light)', background: 'var(--bg-elevated)', color: 'var(--text-primary)', fontSize: '0.95rem', fontWeight: 500, cursor: 'pointer', transition: 'all 0.2s', marginBottom: 20, opacity: googleLoading ? 0.7 : 1 }}>
             <svg width="18" height="18" viewBox="0 0 24 24">
               <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
               <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>

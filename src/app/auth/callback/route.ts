@@ -16,16 +16,33 @@ export async function GET(request: NextRequest) {
         cookies: {
           getAll()  { return cookieStore.getAll() },
           setAll(cookiesToSet) {
-            try {
-              cookiesToSet.forEach(({ name, value, options }) =>
-                cookieStore.set(name, value, options)
-              )
-            } catch {}
+            try { cookiesToSet.forEach(({ name, value, options }) => cookieStore.set(name, value, options)) } catch {}
           },
         },
       }
     )
-    await supabase.auth.exchangeCodeForSession(code)
+
+    const { data } = await supabase.auth.exchangeCodeForSession(code)
+
+    // Send welcome email for new Google OAuth signups
+    // Check if this is a new user (created within last 30 seconds)
+    if (data?.user?.email) {
+      const createdAt = new Date(data.user.created_at).getTime()
+      const now       = Date.now()
+      const isNewUser = now - createdAt < 30000 // 30 seconds
+
+      if (isNewUser) {
+        try {
+          await fetch(`${process.env.NEXT_PUBLIC_APP_URL}/api/welcome-email`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email: data.user.email }),
+          })
+        } catch {
+          // Silently fail
+        }
+      }
+    }
   }
 
   return NextResponse.redirect(new URL('/dashboard', request.url))
