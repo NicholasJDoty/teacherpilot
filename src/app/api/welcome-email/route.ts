@@ -9,7 +9,7 @@ export async function POST(req: NextRequest) {
     if (!email) return NextResponse.json({ error: 'No email provided' }, { status: 400 })
 
     await resend.emails.send({
-      from: 'TeacherPilot <hello@teacherspilot.app>',
+      from: 'TeacherPilot <hello@teacherspilot.com>',
       to: email,
       subject: 'Welcome to TeacherPilot — here\'s how to save your first hour',
       html: `
