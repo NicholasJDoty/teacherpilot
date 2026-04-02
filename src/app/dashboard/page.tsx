@@ -31,6 +31,7 @@ export default function DashboardPage() {
   const [tab, setTab]                         = useState<'generate'|'library'>('generate')
   const [generationsUsed, setGenerationsUsed] = useState(0)
   const [isPro, setIsPro]                     = useState(false)
+  const [profileComplete, setProfileComplete] = useState(false)
   const [upgraded, setUpgraded]               = useState(false)
 
   useEffect(() => {
@@ -63,8 +64,9 @@ export default function DashboardPage() {
     const start = new Date(); start.setDate(1); start.setHours(0,0,0,0)
     const { count } = await supabase.from('generations').select('*', { count: 'exact', head: true }).eq('user_id', uid).gte('created_at', start.toISOString())
     setGenerationsUsed(count || 0)
-    const { data: profile } = await supabase.from('profiles').select('is_pro').eq('id', uid).single()
+    const { data: profile } = await supabase.from('profiles').select('is_pro, profile_complete').eq('id', uid).single()
     if (profile?.is_pro) setIsPro(true)
+    if (profile?.profile_complete) setProfileComplete(true)
   }
 
   const generate = async () => {
@@ -94,7 +96,6 @@ export default function DashboardPage() {
   }
 
   const logout = async () => { const s = createClient(); await s.auth.signOut(); router.push('/') }
-
   const limitReached = !isPro && generationsUsed >= 10
 
   return (
@@ -106,10 +107,22 @@ export default function DashboardPage() {
         </div>
       )}
 
+      {/* Profile completion nudge */}
+      {!profileComplete && (
+        <div style={{ background: 'var(--accent-dim)', borderBottom: '1px solid rgba(245,166,35,0.3)', padding: '10px 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: '0.88rem', color: 'var(--accent)' }}>
+            ✦ <strong>Set up My Classroom</strong> — tell us about your students once and every generation gets automatically personalized
+          </span>
+          <Link href="/classroom" className="btn btn-sm" style={{ background: 'var(--accent)', color: '#0D0F12', fontWeight: 600 }}>
+            Set up now →
+          </Link>
+        </div>
+      )}
+
       <header style={{ borderBottom: '1px solid var(--border)', padding: '0 24px', height: 60, display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'var(--bg-card)', position: 'sticky', top: 0, zIndex: 50 }}>
         <Link href="/" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <div style={{ width: 28, height: 28, background: 'var(--accent)', borderRadius: 7, display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: '0.85rem', color: '#0D0F12' }}>T</div>
-          <span style={{ fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: '1rem' }}>TeacherPilot</span>
+          <span style={{ fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: '1rem' }}>TeachersPilot</span>
         </Link>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <div style={{ padding: '4px 12px', borderRadius: 999, background: limitReached ? 'rgba(248,113,113,0.1)' : 'var(--bg-elevated)', border: `1px solid ${limitReached ? 'rgba(248,113,113,0.3)' : 'var(--border)'}`, fontSize: '0.78rem', color: limitReached ? 'var(--red)' : 'var(--text-muted)' }}>
@@ -139,8 +152,15 @@ export default function DashboardPage() {
               {library.length > 0 && <span style={{ marginLeft: 'auto', background: 'var(--border)', borderRadius: 999, padding: '1px 7px', fontSize: '0.72rem', color: 'var(--text-muted)' }}>{library.length}</span>}
             </button>
 
+            <Link href="/classroom"
+              style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', borderRadius: 8, color: profileComplete ? 'var(--green)' : 'var(--accent)', fontSize: '0.85rem', fontWeight: 500, textDecoration: 'none' }}>
+              <span>🏠</span> My Classroom
+              {!profileComplete && <span style={{ marginLeft: 'auto', fontSize: '0.65rem', background: 'var(--accent-dim)', color: 'var(--accent)', padding: '2px 6px', borderRadius: 999, border: '1px solid rgba(245,166,35,0.3)' }}>Setup</span>}
+              {profileComplete && <span style={{ marginLeft: 'auto', fontSize: '0.65rem', background: 'var(--green-dim)', color: 'var(--green)', padding: '2px 6px', borderRadius: 999, border: '1px solid rgba(62,207,142,0.3)' }}>✓</span>}
+            </Link>
+
             <Link href="/staffroom"
-              style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', borderRadius: 8, color: isPro ? 'var(--accent)' : 'var(--text-muted)', fontSize: '0.85rem', fontWeight: isPro ? 500 : 400, textDecoration: 'none' }}>
+              style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', borderRadius: 8, color: isPro ? 'var(--text-secondary)' : 'var(--text-muted)', fontSize: '0.85rem', textDecoration: 'none' }}>
               <span>🏫</span> The Staffroom
               {!isPro && <span style={{ marginLeft: 'auto', fontSize: '0.65rem', background: 'var(--accent-dim)', color: 'var(--accent)', padding: '2px 6px', borderRadius: 999, border: '1px solid rgba(245,166,35,0.3)' }}>Pro</span>}
             </Link>
@@ -152,7 +172,11 @@ export default function DashboardPage() {
             <div style={{ maxWidth: 800, margin: '0 auto' }}>
               <div style={{ marginBottom: 24 }}>
                 <h2 style={{ fontSize: '1.4rem', marginBottom: 4 }}>{tool.icon} {tool.label}</h2>
-                <p style={{ fontSize: '0.88rem', color: 'var(--text-muted)' }}>Describe what you need — grade, subject, topic, accommodations, length.</p>
+                <p style={{ fontSize: '0.88rem', color: 'var(--text-muted)' }}>
+                  {profileComplete
+                    ? '✦ Using your classroom context automatically — just describe the topic'
+                    : 'Describe what you need — grade, subject, topic, accommodations, length.'}
+                </p>
               </div>
 
               {limitReached && (
@@ -168,7 +192,9 @@ export default function DashboardPage() {
               <div style={{ marginBottom: 16 }}>
                 <label className="label">What do you need?</label>
                 <textarea className="input" style={{ minHeight: 130 }}
-                  placeholder="Example: 5th grade science, The Water Cycle, 45-minute lesson, needs ELL supports, exit ticket, and homework"
+                  placeholder={profileComplete
+                    ? `Just type the topic — e.g. "water cycle lesson" or "quiz on fractions"`
+                    : "Example: 5th grade science, The Water Cycle, 45-minute lesson, needs ELL supports, exit ticket, and homework"}
                   value={prompt} onChange={e => setPrompt(e.target.value)} disabled={limitReached} />
               </div>
 
