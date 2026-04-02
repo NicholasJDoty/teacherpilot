@@ -103,11 +103,10 @@ export default function DashboardPage() {
 
       {upgraded && (
         <div style={{ background: 'var(--green-dim)', borderBottom: '1px solid rgba(62,207,142,0.3)', padding: '12px 24px', textAlign: 'center', fontSize: '0.9rem', color: 'var(--green)', fontWeight: 500 }}>
-          🎉 Welcome to Pro! Unlimited generations + The Staffroom unlocked.
+          🎉 Welcome to Pro! Unlimited generations + all Pro features unlocked.
         </div>
       )}
 
-      {/* Profile completion nudge */}
       {!profileComplete && (
         <div style={{ background: 'var(--accent-dim)', borderBottom: '1px solid rgba(245,166,35,0.3)', padding: '10px 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
           <span style={{ fontSize: '0.88rem', color: 'var(--accent)' }}>
@@ -135,7 +134,9 @@ export default function DashboardPage() {
 
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
         <aside style={{ width: 220, borderRight: '1px solid var(--border)', padding: '16px 12px', overflowY: 'auto', background: 'var(--bg-card)', display: 'flex', flexDirection: 'column', gap: 4, flexShrink: 0 }}>
-          <div style={{ fontSize: '0.7rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', padding: '4px 8px', marginBottom: 4 }}>Tools</div>
+
+          {/* Generate tools */}
+          <div style={{ fontSize: '0.7rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', padding: '4px 8px', marginBottom: 4 }}>Generate</div>
           {TOOLS.map(t => (
             <button key={t.id} onClick={() => { setTool(t); setTab('generate'); setOutput(''); setSaved(false) }}
               style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', borderRadius: 8, border: 'none', cursor: 'pointer', textAlign: 'left', background: tool.id === t.id && tab === 'generate' ? 'var(--accent-dim)' : 'transparent', color: tool.id === t.id && tab === 'generate' ? 'var(--accent)' : 'var(--text-secondary)', fontSize: '0.85rem', fontWeight: tool.id === t.id && tab === 'generate' ? 600 : 400, transition: 'all 0.15s', width: '100%' }}>
@@ -143,28 +144,49 @@ export default function DashboardPage() {
             </button>
           ))}
 
-          <div style={{ marginTop: 'auto', paddingTop: 16, display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <div style={{ height: 1, background: 'var(--border)', marginBottom: 8 }} />
+          {/* In-class tools */}
+          <div style={{ height: 1, background: 'var(--border)', margin: '12px 0 8px' }} />
+          <div style={{ fontSize: '0.7rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', padding: '4px 8px', marginBottom: 4 }}>In the classroom</div>
 
-            <button onClick={() => setTab('library')}
-              style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', borderRadius: 8, border: 'none', cursor: 'pointer', width: '100%', textAlign: 'left', background: tab === 'library' ? 'var(--bg-elevated)' : 'transparent', color: tab === 'library' ? 'var(--text-primary)' : 'var(--text-muted)', fontSize: '0.85rem' }}>
-              <span>📁</span> My Library
-              {library.length > 0 && <span style={{ marginLeft: 'auto', background: 'var(--border)', borderRadius: 999, padding: '1px 7px', fontSize: '0.72rem', color: 'var(--text-muted)' }}>{library.length}</span>}
-            </button>
+          <Link href="/live"
+            style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', borderRadius: 8, color: 'var(--green)', fontSize: '0.85rem', fontWeight: 500, textDecoration: 'none', background: 'transparent' }}>
+            <span>🎯</span> Live Lesson Mode
+            <span style={{ marginLeft: 'auto', fontSize: '0.65rem', background: 'var(--green-dim)', color: 'var(--green)', padding: '2px 6px', borderRadius: 999, border: '1px solid rgba(62,207,142,0.3)' }}>Free</span>
+          </Link>
 
-            <Link href="/classroom"
-              style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', borderRadius: 8, color: profileComplete ? 'var(--green)' : 'var(--accent)', fontSize: '0.85rem', fontWeight: 500, textDecoration: 'none' }}>
-              <span>🏠</span> My Classroom
-              {!profileComplete && <span style={{ marginLeft: 'auto', fontSize: '0.65rem', background: 'var(--accent-dim)', color: 'var(--accent)', padding: '2px 6px', borderRadius: 999, border: '1px solid rgba(245,166,35,0.3)' }}>Setup</span>}
-              {profileComplete && <span style={{ marginLeft: 'auto', fontSize: '0.65rem', background: 'var(--green-dim)', color: 'var(--green)', padding: '2px 6px', borderRadius: 999, border: '1px solid rgba(62,207,142,0.3)' }}>✓</span>}
-            </Link>
+          <Link href="/engagement"
+            style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', borderRadius: 8, color: isPro ? 'var(--text-secondary)' : 'var(--text-muted)', fontSize: '0.85rem', textDecoration: 'none' }}>
+            <span>⚡</span> Engagement Engine
+            {!isPro && <span style={{ marginLeft: 'auto', fontSize: '0.65rem', background: 'var(--accent-dim)', color: 'var(--accent)', padding: '2px 6px', borderRadius: 999, border: '1px solid rgba(245,166,35,0.3)' }}>Pro</span>}
+          </Link>
 
-            <Link href="/staffroom"
-              style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', borderRadius: 8, color: isPro ? 'var(--text-secondary)' : 'var(--text-muted)', fontSize: '0.85rem', textDecoration: 'none' }}>
-              <span>🏫</span> The Staffroom
-              {!isPro && <span style={{ marginLeft: 'auto', fontSize: '0.65rem', background: 'var(--accent-dim)', color: 'var(--accent)', padding: '2px 6px', borderRadius: 999, border: '1px solid rgba(245,166,35,0.3)' }}>Pro</span>}
-            </Link>
-          </div>
+          <Link href="/post-lesson"
+            style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', borderRadius: 8, color: isPro ? 'var(--text-secondary)' : 'var(--text-muted)', fontSize: '0.85rem', textDecoration: 'none' }}>
+            <span>🔍</span> Post-Lesson AI
+            {!isPro && <span style={{ marginLeft: 'auto', fontSize: '0.65rem', background: 'var(--accent-dim)', color: 'var(--accent)', padding: '2px 6px', borderRadius: 999, border: '1px solid rgba(245,166,35,0.3)' }}>Pro</span>}
+          </Link>
+
+          {/* Bottom links */}
+          <div style={{ height: 1, background: 'var(--border)', margin: '12px 0 8px' }} />
+
+          <button onClick={() => setTab('library')}
+            style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', borderRadius: 8, border: 'none', cursor: 'pointer', width: '100%', textAlign: 'left', background: tab === 'library' ? 'var(--bg-elevated)' : 'transparent', color: tab === 'library' ? 'var(--text-primary)' : 'var(--text-muted)', fontSize: '0.85rem' }}>
+            <span>📁</span> My Library
+            {library.length > 0 && <span style={{ marginLeft: 'auto', background: 'var(--border)', borderRadius: 999, padding: '1px 7px', fontSize: '0.72rem', color: 'var(--text-muted)' }}>{library.length}</span>}
+          </button>
+
+          <Link href="/classroom"
+            style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', borderRadius: 8, color: profileComplete ? 'var(--green)' : 'var(--accent)', fontSize: '0.85rem', fontWeight: 500, textDecoration: 'none' }}>
+            <span>🏠</span> My Classroom
+            {!profileComplete && <span style={{ marginLeft: 'auto', fontSize: '0.65rem', background: 'var(--accent-dim)', color: 'var(--accent)', padding: '2px 6px', borderRadius: 999, border: '1px solid rgba(245,166,35,0.3)' }}>Setup</span>}
+            {profileComplete && <span style={{ marginLeft: 'auto', fontSize: '0.65rem', background: 'var(--green-dim)', color: 'var(--green)', padding: '2px 6px', borderRadius: 999, border: '1px solid rgba(62,207,142,0.3)' }}>✓</span>}
+          </Link>
+
+          <Link href="/staffroom"
+            style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', borderRadius: 8, color: isPro ? 'var(--text-secondary)' : 'var(--text-muted)', fontSize: '0.85rem', textDecoration: 'none' }}>
+            <span>🏫</span> The Staffroom
+            {!isPro && <span style={{ marginLeft: 'auto', fontSize: '0.65rem', background: 'var(--accent-dim)', color: 'var(--accent)', padding: '2px 6px', borderRadius: 999, border: '1px solid rgba(245,166,35,0.3)' }}>Pro</span>}
+          </Link>
         </aside>
 
         <main style={{ flex: 1, overflow: 'auto', padding: '28px 32px' }}>
@@ -173,9 +195,7 @@ export default function DashboardPage() {
               <div style={{ marginBottom: 24 }}>
                 <h2 style={{ fontSize: '1.4rem', marginBottom: 4 }}>{tool.icon} {tool.label}</h2>
                 <p style={{ fontSize: '0.88rem', color: 'var(--text-muted)' }}>
-                  {profileComplete
-                    ? '✦ Using your classroom context automatically — just describe the topic'
-                    : 'Describe what you need — grade, subject, topic, accommodations, length.'}
+                  {profileComplete ? '✦ Using your classroom context automatically — just describe the topic' : 'Describe what you need — grade, subject, topic, accommodations, length.'}
                 </p>
               </div>
 
@@ -183,7 +203,7 @@ export default function DashboardPage() {
                 <div style={{ padding: '16px 20px', background: 'rgba(248,113,113,0.08)', border: '1px solid rgba(248,113,113,0.25)', borderRadius: 'var(--radius-md)', marginBottom: 20, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
                   <div>
                     <div style={{ fontWeight: 600, color: 'var(--red)', fontSize: '0.9rem', marginBottom: 2 }}>Monthly limit reached</div>
-                    <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>Upgrade to Pro for unlimited generations + The Staffroom.</div>
+                    <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>Upgrade to Pro for unlimited generations + all Pro features.</div>
                   </div>
                   <Link href="/pricing" className="btn btn-primary btn-sm">Upgrade →</Link>
                 </div>
@@ -192,9 +212,7 @@ export default function DashboardPage() {
               <div style={{ marginBottom: 16 }}>
                 <label className="label">What do you need?</label>
                 <textarea className="input" style={{ minHeight: 130 }}
-                  placeholder={profileComplete
-                    ? `Just type the topic — e.g. "water cycle lesson" or "quiz on fractions"`
-                    : "Example: 5th grade science, The Water Cycle, 45-minute lesson, needs ELL supports, exit ticket, and homework"}
+                  placeholder={profileComplete ? 'Just type the topic — e.g. "water cycle lesson" or "quiz on fractions"' : 'Example: 5th grade science, The Water Cycle, 45-minute lesson, needs ELL supports, exit ticket, and homework'}
                   value={prompt} onChange={e => setPrompt(e.target.value)} disabled={limitReached} />
               </div>
 
